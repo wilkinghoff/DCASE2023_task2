@@ -83,7 +83,8 @@ def model_emb_cnn(num_classes, raw_dim, n_subclusters, use_bias=False):
     y = label_input
     x = data_input
     l2_weight_decay = tf.keras.regularizers.l2(1e-5)
-    x_mix, y = MixupLayer(prob=0.5)([x, y])
+    x_mix = x
+    x_mix, y = MixupLayer(prob=0.5)([x_mix, y])
 
     #x_mag, x_fft, y = NoMatchLayer(prob=0.5)([x_mag, x_fft, y])
 
@@ -124,9 +125,14 @@ def model_emb_cnn(num_classes, raw_dim, n_subclusters, use_bias=False):
     emb_fft = tf.keras.layers.Dense(128, name='emb_fft', kernel_regularizer=l2_weight_decay, use_bias=use_bias)(x)
 
     # magnitude
+    #x_mix, y = MixupLayer(prob=0.5)([x_mix, y])
     x = tf.keras.layers.Reshape((raw_dim,))(x_mix)
     x = MagnitudeSpectrogram(16000, 1024, 512, f_max=8000, f_min=200)(x)
-    x = tf.keras.layers.Lambda(lambda x: x - tf.math.reduce_mean(x, axis=1, keepdims=True))(x) # CMN-like normalization
+
+    #x_mean = tf.keras.layers.Lambda(lambda x: tf.math.reduce_mean(x[:,:,:,0], axis=1))(x)
+    #x_max = tf.keras.layers.Lambda(lambda x: tf.math.reduce_max(x[:,:,:,0], axis=1))(x)
+
+    x = tf.keras.layers.Lambda(lambda x: x-tf.math.reduce_mean(x, axis=1, keepdims=True))(x) # CMN-like normalization
     x = tf.keras.layers.BatchNormalization(axis=-2)(x)
 
     # first block
@@ -217,9 +223,12 @@ def model_emb_cnn(num_classes, raw_dim, n_subclusters, use_bias=False):
     #x = tf.keras.layers.Dropout(0.5)(x)
     emb_mel = tf.keras.layers.Dense(128, kernel_regularizer=l2_weight_decay, name='emb_mel', use_bias=use_bias)(x)
 
+    #mean_mel = tf.keras.layers.Dense(128, kernel_regularizer=l2_weight_decay, name='max_mel', use_bias=use_bias)(x_max)
+    #max_mel = tf.keras.layers.Dense(128, kernel_regularizer=l2_weight_decay, name='mean_mel', use_bias=use_bias)(x_mean)
+
     # prepare output
     x = tf.keras.layers.Concatenate(axis=-1)([emb_fft, emb_mel])
-    #x = tf.keras.layers.Add()([emb_fft, emb_mel])
+    #x = tf.keras.layers.Multiply()([emb_fft, emb_mel])
     #x = tf.keras.layers.Dense(128, kernel_regularizer=l2_weight_decay, use_bias=use_bias)(x)
     output = SCAdaCos(n_classes=num_classes*2, n_subclusters=n_subclusters)([x, y, label_input])
     loss_output = tf.keras.layers.Lambda(lambda x: tf.stack(x, axis=-1))([output, y])
@@ -248,7 +257,7 @@ else:
     train_files = []
     train_atts = []
     train_domains = []
-    dicts = ['./dev_data/']#, './eval_data/']
+    dicts = ['./dev_data/', './eval_data/']
     eps = 1e-12
     for dict in dicts:
         for label, category in enumerate(os.listdir(dict)):
@@ -260,7 +269,7 @@ else:
                     wav, fs = sf.read(file_path)
                     raw = librosa.core.to_mono(wav.transpose()).transpose()
                     #raw = librosa.util.pad_center(raw, size=192000)
-                    raw = adjust_size(raw, 192000)
+                    raw = adjust_size(raw, 288000)
                     train_raw.append(raw)
                     train_ids.append(category + '_' + file.split('_')[1])
                     train_files.append(file_path)
@@ -304,7 +313,7 @@ else:
                 wav, fs = sf.read(file_path)
                 raw = librosa.core.to_mono(wav.transpose()).transpose()
                 #raw = librosa.util.pad_center(raw, size=192000)
-                raw = adjust_size(raw, 192000) #288000 or 192000
+                raw = adjust_size(raw, 288000) #288000 or 192000
                 eval_raw.append(raw)
                 eval_ids.append(category + '_' + file.split('_')[1])
                 eval_normal.append(file.split('_test_')[1].split('_')[0] == 'normal')
@@ -324,7 +333,7 @@ else:
     np.save('eval_atts.npy', eval_atts)
     np.save('eval_domains.npy', eval_domains)
     np.save(str(target_sr) + '_eval_raw.npy', eval_raw)
-"""
+
 # load test data
 print('Loading test data')
 if os.path.isfile(str(target_sr) + '_test_raw.npy'):
@@ -336,16 +345,19 @@ else:
     test_ids = []
     test_files = []
     eps = 1e-12
-    for label, category in enumerate(categories):
+    for label, category in enumerate(os.listdir("./eval_data/")):
         print(category)
         for count, file in tqdm(enumerate(os.listdir("./eval_data/" + category + "/test")),
                                 total=len(os.listdir("./eval_data/" + category + "/test"))):
-            file_path = "./eval_data/" + category + "/test/" + file
-            wav, fs = sf.read(file_path)
-            raw = librosa.core.to_mono(wav.transpose()).transpose()[:10 * target_sr]
-            test_raw.append(raw)
-            test_ids.append(category + '_' + file.split('_')[1])
-            test_files.append(file_path)
+            if file.endswith('.wav'):
+                file_path = "./eval_data/" + category + "/test/" + file
+                wav, fs = sf.read(file_path)
+                raw = librosa.core.to_mono(wav.transpose()).transpose()
+                #raw = librosa.util.pad_center(raw, size=192000)
+                raw = adjust_size(raw, 288000) #288000 or 192000
+                test_raw.append(raw)
+                test_ids.append(category + '_' + file.split('_')[1])
+                test_files.append(file_path)
     # reshape arrays and store
     test_ids = np.array(test_ids)
     test_files = np.array(test_files)
@@ -353,7 +365,7 @@ else:
     np.save('test_ids.npy', test_ids)
     np.save('test_files.npy', test_files)
     np.save(str(target_sr) + '_test_raw.npy', test_raw)
-"""
+
 # encode ids as labels
 le_4train = LabelEncoder()
 
@@ -373,7 +385,7 @@ eval_labels_4train = le_4train.transform(eval_ids_4train)
 le = LabelEncoder()
 train_labels = le.fit_transform(train_ids)
 eval_labels = le.transform(eval_ids)
-#test_labels = le.transform(test_ids)
+test_labels = le.transform(test_ids)
 num_classes = len(np.unique(train_labels))
 
 # distinguish between normal and anomalous samples on development set
@@ -399,14 +411,14 @@ epochs = 10
 aeons = 1
 alpha = 1
 n_subclusters = 16
-ensemble_size = 5
+ensemble_size = 10
 
 final_results_dev = np.zeros((ensemble_size, 6))
 final_results_eval = np.zeros((ensemble_size, 6))
 
 pred_eval = np.zeros((eval_raw.shape[0], np.unique(train_labels).shape[0]))
 pred_unknown = np.zeros((unknown_raw.shape[0], np.unique(train_labels).shape[0]))
-#pred_test = np.zeros((test_raw.shape[0], np.unique(train_labels).shape[0]))
+pred_test = np.zeros((test_raw.shape[0], np.unique(train_labels).shape[0]))
 pred_train = np.zeros((train_labels.shape[0], np.unique(train_labels).shape[0]))
 
 for k_ensemble in np.arange(ensemble_size):
@@ -422,7 +434,7 @@ for k_ensemble in np.arange(ensemble_size):
 
     # compile model
     data_input, label_input, loss_output = model_emb_cnn(num_classes=num_classes_4train,
-                                                             raw_dim=eval_raw.shape[1], n_subclusters=n_subclusters, use_bias=False)
+                                                             raw_dim=eval_raw.shape[1], n_subclusters=n_subclusters, use_bias=True)
     model = tf.keras.Model(inputs=[data_input, label_input], outputs=[loss_output])
     model.compile(loss=[mixupLoss], optimizer=tf.keras.optimizers.Adam())
     #print(model.summary())
@@ -447,37 +459,55 @@ for k_ensemble in np.arange(ensemble_size):
                                                                'SCAdaCos': SCAdaCos,
                                                                'MagnitudeSpectrogram': MagnitudeSpectrogram})
 
-        eval_class_pred = np.argmax(model.predict([eval_raw, np.zeros((eval_raw.shape[0], num_classes_4train))], batch_size=batch_size)[:,:,0], axis=-1)
-        unknown_class_pred = np.argmax(model.predict([unknown_raw, np.zeros((unknown_raw.shape[0], num_classes_4train))], batch_size=batch_size)[:, :, 0], axis=-1)
+        #eval_class_pred = np.argmax(model.predict([eval_raw, np.zeros((eval_raw.shape[0], num_classes_4train))], batch_size=batch_size)[:,:,0], axis=-1)
+        #unknown_class_pred = np.argmax(model.predict([unknown_raw, np.zeros((unknown_raw.shape[0], num_classes_4train))], batch_size=batch_size)[:, :, 0], axis=-1)
+        #train_class_pred = np.argmax(model.predict([train_raw, np.zeros((train_raw.shape[0], num_classes_4train))], batch_size=batch_size)[:, :, 0], axis=-1)
         #print(eval_class_pred)
         #print(eval_labels_4train)
-        print(np.mean(eval_class_pred==eval_labels_4train))
-        print(np.mean(unknown_class_pred == unknown_labels_4train))
+        #print(np.mean(train_class_pred==train_labels_4train))
+        #print(np.mean(eval_class_pred==eval_labels_4train))
+        #print(np.mean(unknown_class_pred == unknown_labels_4train))
 
         # extract embeddings
         emb_model = tf.keras.Model(model.input, model.layers[-3].output)
         eval_embs = emb_model.predict([eval_raw, np.zeros((eval_raw.shape[0], num_classes_4train))], batch_size=batch_size)
         train_embs = emb_model.predict([train_raw, np.zeros((train_raw.shape[0], num_classes_4train))], batch_size=batch_size)
         unknown_embs = emb_model.predict([unknown_raw, np.zeros((unknown_raw.shape[0], num_classes_4train))], batch_size=batch_size)
-        #test_embs = emb_model.predict([test_raw, np.zeros((test_raw.shape[0], num_classes_4train))], batch_size=batch_size)
+        test_embs = emb_model.predict([test_raw, np.zeros((test_raw.shape[0], num_classes_4train))], batch_size=batch_size)
 
         # length normalization
         x_train_ln = length_norm(train_embs)
         x_eval_ln = length_norm(eval_embs)
-        #x_test_ln = length_norm(test_embs)
+        x_test_ln = length_norm(test_embs)
         x_unknown_ln = length_norm(unknown_embs)
 
         for j, lab in tqdm(enumerate(np.unique(train_labels))):
-            #cat = le.inverse_transform([lab])[0]
+            cat = le.inverse_transform([lab])[0]
+            #print(cat)
+            #print(np.unique(train_labels_4train[source_train*(train_labels==lab)]))
+            #print(np.mean(train_class_pred[train_labels==lab]==train_labels_4train[train_labels==lab]))
             # prepare mean values for domains
             #kmeans = KMeans(n_clusters=n_subclusters, random_state=0).fit(x_train_ln[source_train*(train_labels == lab)])
-            #means_source_ln = kmeans.cluster_centers_
+            #means_source_ln1 = kmeans.cluster_centers_
             means_source_ln = []
             for jj, lablab in enumerate(np.unique(train_labels_4train[source_train*(train_labels==lab)])):
+                #kmeans = KMeans(n_clusters=n_subclusters, random_state=0).fit(x_train_ln[train_labels_4train==lablab])
+                #means_source_ln.append(kmeans.cluster_centers_)
                 means_source_ln.append(np.mean(x_train_ln[train_labels_4train==lablab], axis=0))
-            means_source_ln = np.array(means_source_ln)
-            #means_source_ln = np.concatenate([means_source_ln, kmeans.cluster_centers_], axis=0)
+            means_source_ln2 = np.array(means_source_ln)
+            #print(means_source_ln2.shape)
+            #means_source_ln2 = np.concatenate(means_source_ln)
+            #print(means_source_ln2.shape)
+            means_source_ln = means_source_ln2#np.concatenate([means_source_ln1, means_source_ln2], axis=0)
+            #means_source_ln = length_norm(means_source_ln)
             means_target_ln = x_train_ln[~source_train * (train_labels == lab)]
+
+            #means_scores = 1-np.dot(means_target_ln, means_source_ln.transpose())
+            #import matplotlib.pyplot as plt
+            #plt.imshow(means_scores, aspect='auto')
+            #plt.show()
+            #target_correction = np.min(means_scores, axis=-1, keepdims=True).transpose()
+            #source_correction = np.min(means_scores, axis=0, keepdims=True)
             """
             cluster_labels = kmeans.labels_
             # compute mahalanobis distances for source domain
@@ -511,36 +541,82 @@ for k_ensemble in np.arange(ensemble_size):
             #input('w8')
 
             # compute cosine distances
-            eval_cos = -np.max(np.dot(x_eval_ln[eval_labels == lab]
-                                      , means_target_ln.transpose()),axis=-1, keepdims=True)
+            eval_cos = np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_target_ln.transpose())#-np.mean(source_correction)#-target_correction
+                              ,axis=-1, keepdims=True)
             #eval_cos = -np.max(1-0.5*maha_eval**2,axis=-1, keepdims=True)
-            eval_cos = np.minimum(eval_cos,-np.max(np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1, keepdims=True))
+            eval_cos = np.minimum(eval_cos,np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose())#-source_correction
+                                                  , axis=-1, keepdims=True))
             #eval_cos = -np.max(np.dot(x_eval_ln[eval_labels_4train == lab]
             #                          , means_source_ln.transpose()),
             #                              axis=-1, keepdims=True)
             #eval_cos = eval_cos-np.max(np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1,keepdims=True)
             #eval_cos = np.minimum(eval_cos, -np.mean(np.sort(np.dot(x_eval_ln[eval_labels == lab], x_train_ln[source_train*(train_labels == lab)].transpose()), axis=-1)[:, -n_subclusters:], keepdims=True, axis=-1))
             #eval_cos = -clf1.score_samples(x_eval_ln[eval_labels == lab])
-            unknown_cos = -np.max(np.dot(x_unknown_ln[unknown_labels == lab]
-                                         , means_target_ln.transpose()),axis=-1, keepdims=True)
+            unknown_cos = np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_target_ln.transpose())#-np.mean(source_correction)#-target_correction
+                                 ,axis=-1, keepdims=True)
             #unknown_cos = -np.max(1 - 0.5 * maha_unknown** 2, axis=-1, keepdims=True)
-            unknown_cos = np.minimum(unknown_cos,-np.max(np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), axis=-1, keepdims=True))
+            unknown_cos = np.minimum(unknown_cos,np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose())#-source_correction
+                                                        , axis=-1, keepdims=True))
+            #import matplotlib.pyplot as plt
+            #plt.plot(np.max(np.dot(np.concatenate([x_eval_ln[eval_labels == lab], x_unknown_ln[unknown_labels == lab], x_train_ln[train_labels==lab]], axis=0), means_source_ln.transpose()), axis=-1), '.')
+            #plt.subplot(3,1,1)
+            #plt.plot(np.sort(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1))
+            #plt.subplot(3,1,2)
+            #plt.plot(np.sort(-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), axis=-1))
+            #plt.subplot(3,1,3)
+            #plt.plot(np.sort(-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose()), axis=-1))
+            #plt.subplot(3, 1, 1)
+            #plt.imshow(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), aspect='auto')
+            #plt.subplot(3, 1, 2)
+            #plt.imshow(-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), aspect='auto')
+            #plt.subplot(3, 1, 3)
+            #plt.imshow(-np.dot(x_train_ln[train_labels == lab], means_source_ln.transpose()), aspect='auto')
+            #from sklearn.metrics.pairwise import euclidean_distances
+            #plt.subplot(3,1,1)
+            #plt.plot(np.min(euclidean_distances(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)-np.mean(np.sort(euclidean_distances(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)[:, 1:], axis=-1), '.')
+            #plt.plot(np.min(euclidean_distances(-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)-np.mean(np.sort(euclidean_distances(-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)[:, 1:], axis=-1), '.')
+            #plt.plot(np.mean(-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose()), axis=-1), '.')
+            #plt.plot(np.min(-np.dot(x_train_ln[train_labels == lab], means_source_ln.transpose()), axis=-1), '.')
+            #plt.plot(np.min(-np.dot(x_train_ln[train_labels == lab], means_target_ln.transpose()), axis=-1), '.')
+            #plt.subplot(3,1,2)
+            #plt.plot(np.mean(-np.dot(x_eval_ln[eval_labels==lab], means_source_ln.transpose()), axis=-1), '.')
+            #plt.plot(np.min(-np.dot(x_eval_ln[eval_labels==lab], means_source_ln.transpose()), axis=-1), '.')
+            #plt.plot(np.min(-np.dot(x_eval_ln[eval_labels==lab], means_target_ln.transpose()), axis=-1), '.')
+            #plt.subplot(3,1,3)
+            #plt.plot(np.mean(-np.dot(x_unknown_ln[unknown_labels==lab], means_source_ln.transpose()), axis=-1), '.')
+            #plt.plot(np.min(-np.dot(x_unknown_ln[unknown_labels==lab], means_source_ln.transpose()), axis=-1), '.')
+            #plt.plot(np.min(-np.dot(x_unknown_ln[unknown_labels==lab], means_target_ln.transpose()), axis=-1), '.')
+            #plt.show()
             #unknown_cos = -np.max(np.dot(x_unknown_ln[unknown_labels_4train == lab]
             #           , means_source_ln.transpose()), axis=-1, keepdims=True)
             #unknown_cos = unknown_cos-np.max(np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()),axis=-1, keepdims=True)
             #unknown_cos = np.minimum(unknown_cos,-np.mean(np.sort(np.dot(x_unknown_ln[unknown_labels == lab],x_train_ln[source_train * (train_labels == lab)].transpose()),axis=-1)[:, -n_subclusters:], keepdims=True, axis=-1))
             #unknown_cos = -clf1.score_samples(x_unknown_ln[unknown_labels == lab])
-            #test_cos = -np.max(np.dot(x_test_ln[test_labels==lab], means_target_ln.transpose()), axis=-1, keepdims=True)
-            #test_cos = np.minimum(test_cos, -np.max(np.dot(x_test_ln[test_labels==lab], means_source_ln.transpose()), axis=-1, keepdims=True))
+            test_cos = np.min(1-np.dot(x_test_ln[test_labels==lab], means_target_ln.transpose())#-np.mean(source_correction)#-target_correction
+                              , axis=-1, keepdims=True)
+            test_cos = np.minimum(test_cos, np.min(1-np.dot(x_test_ln[test_labels==lab], means_source_ln.transpose())#-source_correction
+                                                   , axis=-1, keepdims=True))
+
+
+            train_cos = np.min(1-np.dot(x_train_ln[train_labels==lab], means_target_ln.transpose())#-np.mean(source_correction)#-target_correction
+                               , axis=-1, keepdims=True)
+            train_cos = np.minimum(train_cos, np.min(1-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())#-source_correction
+                                                     , axis=-1, keepdims=True))
 
             if np.sum(eval_labels==lab)>0:
                 pred_eval[eval_labels == lab, j] += np.min(eval_cos, axis=-1)
                 pred_unknown[unknown_labels == lab, j] += np.min(unknown_cos, axis=-1)
+                #pred_eval[eval_labels == lab, j] += np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1)-np.mean(np.sort(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1)[:, :5], axis=-1)
+                #pred_unknown[unknown_labels == lab, j] += np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), axis=-1)-np.mean(np.sort(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), axis=-1)[:, :5], axis=-1)
+                #pred_eval[eval_labels == lab, j] += np.min(euclidean_distances(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)/np.mean(np.sort(euclidean_distances(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)[:, :5], axis=-1)
+                #pred_unknown[unknown_labels == lab, j] += np.min(euclidean_distances(-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)/np.mean(np.sort(euclidean_distances(-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)[:, :5], axis=-1)
             #pred_eval[:, j] += np.min(eval_cos, axis=-1)
             #pred_unknown[:, j] += np.min(unknown_cos, axis=-1)
 
-            #if np.sum(test_labels==lab)>0:
-            #    pred_test[test_labels == lab, j] = +np.min(test_cos, axis=-1)
+            if np.sum(test_labels==lab)>0:
+                pred_test[test_labels == lab, j] += np.min(test_cos, axis=-1)
+
+            pred_train[train_labels == lab, j] += np.min(train_cos, axis=-1)
         #import matplotlib.pyplot as plt
         #for j, lab in tqdm(enumerate(np.unique(train_labels))):
         #    plt.plot(np.min(pred_eval[eval_labels == lab], axis=-1))
@@ -675,33 +751,35 @@ for k_ensemble in np.arange(ensemble_size):
         mean_p_auc = hmean(p_aucs)
         print('mean pAUC: ' + str(mean_p_auc * 100))
         final_results_eval[k_ensemble] = np.array([mean_auc_source, mean_p_auc_source, mean_auc_target, mean_p_auc_target, mean_auc, mean_p_auc])
-
-        # create challenge submission files
-        print('creating submission files')
-        sub_path = './teams/submission/team_fkie'
-        if not os.path.exists(sub_path):
-            os.makedirs(sub_path)
-        for j, cat in enumerate(np.unique(test_ids)):
-            # anomaly scores
-            file_idx = test_labels == le.transform([cat])
-            results_an = pd.DataFrame()
-            results_an['output1'], results_an['output2'] = [[f.split('/')[-1] for f in test_files[file_idx]],
-                                                            [str(s) for s in pred_test[file_idx, le.transform([cat])]]]
-            results_an.to_csv(sub_path + '/anomaly_score_' + cat.split('_')[0] + '_section_' + cat.split('_')[-1] + '_test.csv',
-                              encoding='utf-8', index=False, header=False)
-
-            # decision results
-            train_scores = pred_train[train_labels == le.transform([cat]), le.transform([cat])]
-            threshold = np.percentile(train_scores, q=90)
-            decisions = pred_test[file_idx, le.transform([cat])] > threshold
-            results_dec = pd.DataFrame()
-            results_dec['output1'], results_dec['output2'] = [[f.split('/')[-1] for f in test_files[file_idx]],
-                                                              [str(int(s)) for s in decisions]]
-            results_dec.to_csv(sub_path + '/decision_result_' + cat.split('_')[0] + '_section_' + cat.split('_')[-1] + '_test.csv',
-                               encoding='utf-8', index=False, header=False)
         """
-np.save('pred_eval.npy', pred_eval)
-np.save('pred_unknown.npy', pred_unknown)
+
+# create challenge submission files
+print('creating submission files')
+sub_path = './teams/submission/team_fkie_new_y2'
+if not os.path.exists(sub_path):
+    os.makedirs(sub_path)
+for j, cat in enumerate(np.unique(test_ids)):
+    # anomaly scores
+    file_idx = test_labels == le.transform([cat])
+    results_an = pd.DataFrame()
+    results_an['output1'], results_an['output2'] = [[f.split('/')[-1] for f in test_files[file_idx]],
+                                                    [str(s) for s in pred_test[file_idx, le.transform([cat])]]]
+    results_an.to_csv(sub_path + '/anomaly_score_' + cat.split('_')[0] + '_section_' + cat.split('_')[-1] + '_test.csv',
+                      encoding='utf-8', index=False, header=False)
+
+    # decision results
+    train_scores = pred_train[train_labels == le.transform([cat]), le.transform([cat])]
+    threshold = np.percentile(train_scores, q=90)
+    decisions = pred_test[file_idx, le.transform([cat])] > threshold
+    results_dec = pd.DataFrame()
+    results_dec['output1'], results_dec['output2'] = [[f.split('/')[-1] for f in test_files[file_idx]],
+                                                      [str(int(s)) for s in decisions]]
+    results_dec.to_csv(sub_path + '/decision_result_' + cat.split('_')[0] + '_section_' + cat.split('_')[-1] + '_test.csv',
+                       encoding='utf-8', index=False, header=False)
+np.save('pred_eval_new.npy', pred_eval)
+np.save('pred_unknown_new.npy', pred_unknown)
+np.save('pred_train_new.npy', pred_train)
+np.save('pred_test_new.npy', pred_test)
 print('####################')
 print('####################')
 print('####################')

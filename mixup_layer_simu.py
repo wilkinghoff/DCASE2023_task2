@@ -31,10 +31,11 @@ class MixupLayer(layers.Layer):
         y2 = tf.reverse(inputs[1], axis=[0])
         y = y1 * y_l + y2 * (1 - y_l)
         #y = tf.math.maximum(y1 * y_l, y2 * (1 - y_l))
-        #y_new = tf.concat([tf.zeros_like(y), y2], axis=-1)
-        #y_new = tf.concat([tf.zeros_like(y), y], axis=-1)
-        #y_new = tf.concat([tf.math.minimum(y1 * y_l, y2 * (1 - y_l)), tf.math.maximum(y1 * y_l, y2 * (1 - y_l))], axis=-1)
-        y_new = tf.concat([tf.zeros_like(y), y2*(1-y_l)], axis=-1)
+        #y_new = tf.concat([tf.zeros_like(y), y2], axis=-1)  # about the same
+        y_new = tf.concat([tf.zeros_like(y), y], axis=-1)  # even better?
+        #y_new = tf.concat([y1*y_l, y2*(1-y_l)], axis=-1) # slightly worse
+        #y_new = tf.concat([tf.zeros_like(y), y2*(1-y_l)], axis=-1)
+        #y_new = tf.concat([tf.zeros_like(y), y1 * y_l], axis=-1)  # worse
         # p = 0.1
         p = tf.random.uniform(shape=[tf.shape(inputs[0])[0]]) * 0.5
         y_p = tf.reshape(p, [-1]+[1]*(len(inputs[1].shape)-1))

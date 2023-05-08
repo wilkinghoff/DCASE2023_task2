@@ -434,7 +434,7 @@ for k_ensemble in np.arange(ensemble_size):
 
     # compile model
     data_input, label_input, loss_output = model_emb_cnn(num_classes=num_classes_4train,
-                                                             raw_dim=eval_raw.shape[1], n_subclusters=n_subclusters, use_bias=True)
+                                                             raw_dim=eval_raw.shape[1], n_subclusters=n_subclusters, use_bias=False)
     model = tf.keras.Model(inputs=[data_input, label_input], outputs=[loss_output])
     model.compile(loss=[mixupLoss], optimizer=tf.keras.optimizers.Adam())
     #print(model.summary())
@@ -442,7 +442,7 @@ for k_ensemble in np.arange(ensemble_size):
         print('ensemble iteration: ' + str(k_ensemble+1))
         print('aeon: ' + str(k+1))
         # fit model
-        weight_path = 'wts_' + str(k+1) + 'k_' + str(target_sr) + '_' + str(k_ensemble+1) + '_new.h5'
+        weight_path = 'wts_' + str(k+1) + 'k_' + str(target_sr) + '_' + str(k_ensemble+1) + '_new_no-bias.h5'
         if not os.path.isfile(weight_path):
             class_weights = class_weight.compute_class_weight('balanced', np.unique(train_labels_4train), train_labels_4train)
             #class_weights = np.tile(class_weights, 2)
@@ -545,7 +545,8 @@ for k_ensemble in np.arange(ensemble_size):
                               ,axis=-1, keepdims=True)
             #eval_cos = -np.max(1-0.5*maha_eval**2,axis=-1, keepdims=True)
             eval_cos = np.minimum(eval_cos,np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose())#-source_correction
-                                                  , axis=-1, keepdims=True))
+                                                        , axis=-1, keepdims=True))
+            #eval_cos = np.minimum(eval_cos,0.5*(np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln1.transpose()), axis=-1, keepdims=True)+np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln2.transpose()), axis=-1, keepdims=True)))
             #eval_cos = -np.max(np.dot(x_eval_ln[eval_labels_4train == lab]
             #                          , means_source_ln.transpose()),
             #                              axis=-1, keepdims=True)
@@ -557,6 +558,7 @@ for k_ensemble in np.arange(ensemble_size):
             #unknown_cos = -np.max(1 - 0.5 * maha_unknown** 2, axis=-1, keepdims=True)
             unknown_cos = np.minimum(unknown_cos,np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose())#-source_correction
                                                         , axis=-1, keepdims=True))
+            #unknown_cos = np.minimum(unknown_cos,0.5*(np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln1.transpose()), axis=-1, keepdims=True)+np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln2.transpose()), axis=-1, keepdims=True)))
             #import matplotlib.pyplot as plt
             #plt.plot(np.max(np.dot(np.concatenate([x_eval_ln[eval_labels == lab], x_unknown_ln[unknown_labels == lab], x_train_ln[train_labels==lab]], axis=0), means_source_ln.transpose()), axis=-1), '.')
             #plt.subplot(3,1,1)
@@ -597,15 +599,21 @@ for k_ensemble in np.arange(ensemble_size):
             test_cos = np.minimum(test_cos, np.min(1-np.dot(x_test_ln[test_labels==lab], means_source_ln.transpose())#-source_correction
                                                    , axis=-1, keepdims=True))
 
+            #test_cos = np.minimum(test_cos,0.5*(np.min(1-np.dot(x_test_ln[test_labels == lab], means_source_ln1.transpose()), axis=-1, keepdims=True)+np.min(1-np.dot(x_test_ln[test_labels == lab], means_source_ln2.transpose()), axis=-1, keepdims=True)))
+
 
             train_cos = np.min(1-np.dot(x_train_ln[train_labels==lab], means_target_ln.transpose())#-np.mean(source_correction)#-target_correction
                                , axis=-1, keepdims=True)
             train_cos = np.minimum(train_cos, np.min(1-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())#-source_correction
                                                      , axis=-1, keepdims=True))
 
+            #train_cos = np.minimum(train_cos,0.5*(np.min(1-np.dot(x_train_ln[train_labels == lab], means_source_ln1.transpose()), axis=-1, keepdims=True)+np.min(1-np.dot(x_train_ln[train_labels == lab], means_source_ln2.transpose()), axis=-1, keepdims=True)))
+
             if np.sum(eval_labels==lab)>0:
-                pred_eval[eval_labels == lab, j] += np.min(eval_cos, axis=-1)
-                pred_unknown[unknown_labels == lab, j] += np.min(unknown_cos, axis=-1)
+                #pred_eval[eval_labels == lab, j] += np.min(eval_cos, axis=-1)
+                #pred_unknown[unknown_labels == lab, j] += np.min(unknown_cos, axis=-1)
+                pred_eval[eval_labels == lab, j] = np.maximum(pred_eval[eval_labels==lab, j], np.min(eval_cos, axis=-1))
+                pred_unknown[unknown_labels == lab, j] = np.maximum(pred_unknown[unknown_labels==lab, j], np.min(unknown_cos, axis=-1))
                 #pred_eval[eval_labels == lab, j] += np.min(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1)-np.mean(np.sort(1-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()), axis=-1)[:, :5], axis=-1)
                 #pred_unknown[unknown_labels == lab, j] += np.min(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), axis=-1)-np.mean(np.sort(1-np.dot(x_unknown_ln[unknown_labels == lab], means_source_ln.transpose()), axis=-1)[:, :5], axis=-1)
                 #pred_eval[eval_labels == lab, j] += np.min(euclidean_distances(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)/np.mean(np.sort(euclidean_distances(-np.dot(x_eval_ln[eval_labels == lab], means_source_ln.transpose()),-np.dot(x_train_ln[train_labels==lab], means_source_ln.transpose())), axis=-1)[:, :5], axis=-1)
@@ -614,9 +622,11 @@ for k_ensemble in np.arange(ensemble_size):
             #pred_unknown[:, j] += np.min(unknown_cos, axis=-1)
 
             if np.sum(test_labels==lab)>0:
-                pred_test[test_labels == lab, j] += np.min(test_cos, axis=-1)
+                #pred_test[test_labels == lab, j] += np.min(test_cos, axis=-1)
+                pred_test[test_labels == lab, j] = np.maximum(pred_test[test_labels == lab, j], np.min(test_cos, axis=-1))
 
-            pred_train[train_labels == lab, j] += np.min(train_cos, axis=-1)
+            #pred_train[train_labels == lab, j] += np.min(train_cos, axis=-1)
+            pred_train[train_labels == lab, j] = np.maximum(pred_train[train_labels == lab, j], np.min(train_cos, axis=-1))
         #import matplotlib.pyplot as plt
         #for j, lab in tqdm(enumerate(np.unique(train_labels))):
         #    plt.plot(np.min(pred_eval[eval_labels == lab], axis=-1))
@@ -755,7 +765,7 @@ for k_ensemble in np.arange(ensemble_size):
 
 # create challenge submission files
 print('creating submission files')
-sub_path = './teams/submission/team_fkie_new_y2'
+sub_path = './teams/submission/team_fkie_new_no-bias'
 if not os.path.exists(sub_path):
     os.makedirs(sub_path)
 for j, cat in enumerate(np.unique(test_ids)):
@@ -776,10 +786,10 @@ for j, cat in enumerate(np.unique(test_ids)):
                                                       [str(int(s)) for s in decisions]]
     results_dec.to_csv(sub_path + '/decision_result_' + cat.split('_')[0] + '_section_' + cat.split('_')[-1] + '_test.csv',
                        encoding='utf-8', index=False, header=False)
-np.save('pred_eval_new.npy', pred_eval)
-np.save('pred_unknown_new.npy', pred_unknown)
-np.save('pred_train_new.npy', pred_train)
-np.save('pred_test_new.npy', pred_test)
+np.save('pred_eval_new_no-bias.npy', pred_eval)
+np.save('pred_unknown_new_no-bias.npy', pred_unknown)
+np.save('pred_train_new_no-bias.npy', pred_train)
+np.save('pred_test_new_no-bias.npy', pred_test)
 print('####################')
 print('####################')
 print('####################')

@@ -618,10 +618,7 @@ for j, cat in enumerate(np.unique(test_ids)):
                                                       [str(int(s)) for s in decisions]]
     results_dec.to_csv(sub_path + '/decision_result_' + cat.split('_')[0] + '_section_' + cat.split('_')[-1] + '_test.csv',
                        encoding='utf-8', index=False, header=False)
-np.save('pred_eval_new_no-bias.npy', pred_eval)
-np.save('pred_unknown_new_no-bias.npy', pred_unknown)
-np.save('pred_train_new_no-bias.npy', pred_train)
-np.save('pred_test_new_no-bias.npy', pred_test)
+
 print('####################')
 print('####################')
 print('####################')

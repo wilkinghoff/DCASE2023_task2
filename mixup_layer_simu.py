@@ -32,7 +32,7 @@ class MixupLayer(layers.Layer):
         p = tf.random.uniform(shape=[tf.shape(inputs[0])[0]]) * 0.5
         y_p = tf.reshape(p, [-1]+[1]*(len(inputs[1].shape)-1))
         N = inputs[1].shape[1]
-        y1_new = tf.concat([y1, tf.zeros_like(y)], axis=-1)*(1-y_p-y_p/(N-1))+y_p/(N-1)
+        y1_new = tf.concat([y1, tf.zeros_like(y)], axis=-1)*(1-y_p+y_p/N)+y_p/N
 
         # apply mixup or not
         dec = tf.dtypes.cast(tf.random.uniform(shape=[tf.shape(inputs[0])[0]]) < self.prob, tf.dtypes.float32)
